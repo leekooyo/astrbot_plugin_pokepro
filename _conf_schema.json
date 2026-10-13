@@ -297,7 +297,7 @@
     "poke_max_times": {
         "description": "发戳最大次数",
         "type": "int",
-        "hint": "次数限制机制：使用命令 “戳 @某人 次数” 超出最大次数时, 则把次数限制为最大次数, 但bot管理员不受此限制",
+        "hint": "命令、LLM 工具、反戳和定时任务均受此最大次数限制",
         "slider": {
             "min": 1,
             "max": 10,
@@ -326,6 +326,38 @@
             "机器人",
             "bot"
         ]
+    },
+    "allow_group_broadcast": {
+        "description": "允许管理员群发戳",
+        "type": "bool",
+        "hint": "默认关闭。只有管理员可使用戳全体成员，且仍受人数和分钟配额限制。",
+        "default": false
+    },
+    "broadcast_max_targets": {
+        "description": "单次群发最多人数",
+        "type": "int",
+        "slider": {"min": 1, "max": 200, "step": 1},
+        "default": 50
+    },
+    "max_targets_per_action": {
+        "description": "每次动作最多目标数",
+        "type": "int",
+        "hint": "命令、LLM 工具和定时任务共用此限制。",
+        "slider": {"min": 1, "max": 200, "step": 1},
+        "default": 50
+    },
+    "max_pokes_per_minute": {
+        "description": "每分钟最多发送次数",
+        "type": "int",
+        "hint": "所有来源共用同一配额，超过后跳过，不排队补发。",
+        "slider": {"min": 1, "max": 300, "step": 1},
+        "default": 60
+    },
+    "group_disabled_actions": {
+        "description": "按群禁用动作",
+        "type": "list",
+        "hint": "每行格式：群号:动作,动作。可用动作：all、response、follow、antipoke、llm、face、meme、record、ban、scheduler、broadcast、command、tool、keyword。例：123456:ban,follow",
+        "default": []
     },
     "scheduler": {
         "description": "定时戳配置",
