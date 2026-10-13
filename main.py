@@ -39,8 +39,9 @@ class PokeproPlugin(Star):
     @filter.command("戳", alias={"戳我", "戳全体成员"})
     async def on_poke_cmd(self, event: AiocqhttpMessageEvent):
         """戳 @某人/我/全体成员"""
-        msg = event.message_str
-        end = msg.split()[-1]
+        msg = event.message_str.strip()
+        parts = msg.split()
+        end = parts[-1] if parts else ""
         times = self._normalize_poke_times(end if end.isdigit() else 1)
 
         is_admin = event.is_admin()
@@ -48,25 +49,47 @@ class PokeproPlugin(Star):
         self_id = event.get_self_id()
 
         # 获取目标用户ID
-        target_ids: list[str] = get_ats(event)
-        if "我" in msg:
-            target_ids.append(event.get_sender_id())
-        if "全体成员" in msg and is_admin:
-            target_ids = [str(mid) for mid in await get_member_ids(event)]
+        broadcast = "全体成员" in msg
+        if broadcast:
+            if not gid:
+                yield event.plain_result("戳全体成员仅群聊可用。")
+                return
+            if not is_admin:
+                yield event.plain_result("戳全体成员仅管理员可用。")
+                return
+            if not self.cfg.allow_group_broadcast:
+                yield event.plain_result("群发戳未启用，请先在插件配置中开启。")
+                return
+            target_ids = [str(mid) for mid in await get_member_ids(
+                event, num=self.cfg.broadcast_max_targets
+            )]
+            action = "broadcast"
+        else:
+            target_ids: list[str] = get_ats(event, skip_first_seg=False)
+            if msg.startswith("戳我") or "我" in parts[1:]:
+                target_ids.append(event.get_sender_id())
+            if not target_ids and not gid:
+                target_ids.append(event.get_sender_id())
+            action = "command"
+
+        target_ids = list(dict.fromkeys(
+            tid for tid in target_ids if tid.isdigit() and tid != self_id
+        ))
         if not target_ids:
-            result: dict = await event.bot.get_group_msg_history(group_id=int(gid))
-            target_ids = [str(msg["sender"]["user_id"]) for msg in result["messages"]]
-        if self_id in target_ids:
-            target_ids.remove(self_id)
-        if not target_ids:
+            yield event.plain_result("用法：戳 @某人 [次数]、戳我 [次数]；群发请用戳全体成员。")
             return
 
-        await self.sender.event_send(
+        result = await self.sender.event_send(
             event,
             target_ids=target_ids,
             times=times,
+            action=action,
         )
         event.stop_event()
+        yield event.plain_result(
+            f"戳一戳：成功 {result.succeeded}，失败 {result.failed}，跳过 {result.skipped}"
+            + (f"（{result.reason}）" if result.reason else "")
+        )
 
     @filter.llm_tool()
     async def llm_poke_user(
@@ -91,12 +114,17 @@ class PokeproPlugin(Star):
         actual_times = self._normalize_poke_times(times)
 
         try:
-            await self.sender.event_send(
+            result = await self.sender.event_send(
                 event,
                 target_ids=[user_id],
                 times=actual_times,
+                action="tool",
             )
-            return f"已戳用户 {user_id} {actual_times} 次"
+            return (
+                f"戳用户 {user_id}：成功 {result.succeeded}，失败 {result.failed}，"
+                f"跳过 {result.skipped}"
+                + (f"（{result.reason}）" if result.reason else "")
+            )
         except Exception as e:
             return f"戳一戳失败：{e}"
 
@@ -106,7 +134,7 @@ class PokeproPlugin(Star):
         """监听消息"""
         # 设置定时器用的客户端
         if self.scheduler:
-            self.scheduler.set_client(event.bot)
+            self.scheduler.set_client(event.bot, event.get_self_id())
 
         # 收到自己被戳的事件
         if self.cfg.on_poke:
@@ -120,4 +148,5 @@ class PokeproPlugin(Star):
                     event,
                     target_ids=[event.get_sender_id()],
                     times=1,
+                    action="keyword",
                 )

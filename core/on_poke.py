@@ -55,9 +55,6 @@ class GetPokeHandler:
 
     async def handle(self, event: AiocqhttpMessageEvent):
         """响应戳一戳事件"""
-        if not self._modules:
-            return
-
         if event.get_extra("is_poked"):
             return
         evt = PokeEvent.from_event(event)
@@ -68,20 +65,35 @@ class GetPokeHandler:
         if evt.is_self_send:
             return
 
-        # 冷却机制
+        # 别人被戳则随机跟戳
+        if not evt.is_self_poked:
+            if (
+                random.random() < self.cfg.follow_prob
+                and self.cfg.action_allowed(evt.group_id, "follow")
+                and self.cooldown.allow(evt.group_id, evt.user_id)
+            ):
+                await self.sender.event_send(
+                    event, target_ids=[evt.target_id], times=1, action="follow"
+                )
+            return
+
+        if not self.cfg.action_allowed(evt.group_id, "response"):
+            return
+        if not self._modules:
+            return
+        choices = [
+            (module, weight) for module, weight in zip(self._modules, self._weights)
+            if self.cfg.action_allowed(evt.group_id, str(module))
+        ]
+        if not choices:
+            return
         if not self.cooldown.allow(evt.group_id, evt.user_id):
             return
 
-        # 别人被戳则随机跟戳
-        if not evt.is_self_poked and random.random() < self.cfg.follow_prob:
-            await self.sender.event_send(event, target_ids=[evt.target_id], times=1)
-            return
-
-        # 只响应戳自己的戳
-        if not evt.is_self_poked:
-            return
-
-        module = random.choices(self._modules, self._weights, k=1)[0]
+        module = random.choices(
+            [module for module, _ in choices],
+            [weight for _, weight in choices], k=1
+        )[0]
         logger.debug(f"[戳一戳] 触发响应模块: {module}")
         handler = self.handlers[module]
 
@@ -100,6 +112,7 @@ class GetPokeHandler:
             event,
             target_ids=[event.get_sender_id()],
             times=self.cfg.get_antipoke_times(),
+            action="antipoke",
         )
         event.stop_event()
         yield None
@@ -142,6 +155,9 @@ class GetPokeHandler:
 
     async def respond_ban(self, event: AiocqhttpMessageEvent):
         """禁言"""
+        if not event.get_group_id() or not self.cfg.action_allowed(event.get_group_id(), "ban"):
+            yield None
+            return
         cfg = self.cfg.ban
         try:
             can_ban, reason = await check_ban_permission(
@@ -166,6 +182,12 @@ class GetPokeHandler:
         finally:
             if not template:
                 logger.info("[戳一戳] 禁言提示模板为空，跳过llm回复")
+                yield None
+                return
+            if self.cfg.llm.weight <= 0 or not self.cfg.action_allowed(
+                event.get_group_id(), "llm"
+            ):
+                logger.info("[戳一戳] LLM 已禁用，跳过禁言提示")
                 yield None
                 return
             prompt = await self.llm.build_prompt(event, template)

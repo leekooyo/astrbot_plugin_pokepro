@@ -112,7 +112,12 @@ async def get_member_ids(event: AiocqhttpMessageEvent, num: int = 200) -> list[i
         members_data = await event.bot.get_group_member_list(
             group_id=int(event.get_group_id())
         )
-        user_ids = [member.get("user_id", "") for member in members_data]
+        self_id = event.get_self_id()
+        user_ids = list(dict.fromkeys(
+            member.get("user_id") for member in members_data
+            if str(member.get("user_id", "")).isdigit()
+            and str(member.get("user_id")) != self_id
+        ))
         return random.sample(user_ids, min(num, len(user_ids)))
     except Exception as e:
         logger.error(f"获取群成员信息失败：{e}")

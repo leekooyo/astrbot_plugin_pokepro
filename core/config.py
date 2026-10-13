@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import random
+import json
+import time
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from types import MappingProxyType, UnionType
@@ -178,12 +180,25 @@ class PluginConfig(ConfigNode):
     poke_max_times: int
     poke_interval: float
     poke_keywords: list[str]
+    allow_group_broadcast: bool
+    broadcast_max_targets: int
+    max_targets_per_action: int
+    max_pokes_per_minute: int
+    group_disabled_actions: list[str]
 
     scheduler: SchedulerConfig
 
     _plugin_name = "astrbot_plugin_pokepro"
 
     def __init__(self, cfg: AstrBotConfig, context: Context):
+        for key, default in {
+            "allow_group_broadcast": False,
+            "broadcast_max_targets": 50,
+            "max_targets_per_action": 50,
+            "max_pokes_per_minute": 60,
+            "group_disabled_actions": [],
+        }.items():
+            cfg.setdefault(key, default)
         super().__init__(cfg)
         self.context = context
         self.target_list = self._parse_target()
@@ -196,6 +211,7 @@ class PluginConfig(ConfigNode):
         self.file_pool_dir.mkdir(parents=True, exist_ok=True)
 
         self.meme_image_pool = self._collect_meme_images()
+        self._disabled_actions = self._parse_disabled_actions()
         self._ensure_non_empty_pools()
         self.save_config()
 
@@ -203,11 +219,73 @@ class PluginConfig(ConfigNode):
         target_list = []
         for arg in self.scheduler.target:
             try:
-                group, qq = arg.split(":")
+                group, qq = arg.split(":", 1)
+                if not group.isdigit() or not (qq.isdigit() or qq.lower() in {"random", "rand", "*", "随机"}):
+                    raise ValueError("定时戳目标格式无效")
                 target_list.append((group, qq))
             except ValueError:
-                pass
+                logger.warning("跳过格式无效的定时戳目标")
         return target_list
+
+    def _parse_disabled_actions(self) -> dict[str, set[str]]:
+        allowed = {"all", "response", "follow", "antipoke", "llm", "face",
+                   "meme", "record", "ban", "scheduler", "broadcast",
+                   "command", "tool", "keyword"}
+        rules: dict[str, set[str]] = {}
+        for raw in self.group_disabled_actions or []:
+            if not isinstance(raw, str) or ":" not in raw:
+                logger.warning("跳过格式无效的群动作配置")
+                continue
+            gid, actions = raw.split(":", 1)
+            parsed = {item.strip().lower() for item in actions.split(",")}
+            if not gid.isdigit() or not parsed or not parsed <= allowed:
+                logger.warning("跳过格式无效的群动作配置")
+                continue
+            rules.setdefault(gid, set()).update(parsed)
+        return rules
+
+    def action_allowed(self, group_id: int | str | None, action: str) -> bool:
+        if not group_id:
+            return True
+        gid = str(group_id)
+        disabled = self._disabled_actions.get(gid, set())
+        if "all" in disabled or action in disabled:
+            return False
+        return self._gatekeeper_allows(gid)
+
+    def _gatekeeper_allows(self, gid: str) -> bool:
+        """定时任务和 notice 也要服从群策略，策略异常时停止主动动作。"""
+        path = Path(get_astrbot_plugin_data_path()) / "gatekeeper" / "modes.json"
+        if not path.exists():
+            return True
+        try:
+            if path.stat().st_size > 1 << 20:
+                return False
+            policy = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(policy, dict) or not isinstance(policy.get("groups"), dict):
+                return False
+            meta = policy.get("meta") or {}
+            if not isinstance(meta, dict):
+                return False
+            if not meta.get("on", True) or meta.get("released", False):
+                return True
+            bans = meta.get("bans") or {}
+            if isinstance(bans, dict) and isinstance(bans.get(gid), dict):
+                until = bans[gid].get("until")
+                if until is None or float(until) > time.time():
+                    return False
+            entry = policy["groups"].get(gid)
+            if entry is None:
+                return True
+            if not isinstance(entry, dict):
+                return False
+            off = entry.get("manual_off") or []
+            return (entry.get("mode") in ("plugin", "both")
+                    and isinstance(off, list)
+                    and "astrbot_plugin_pokepro" not in off)
+        except Exception as exc:
+            logger.warning(f"读取 gatekeeper 策略失败，停止戳一戳：{exc}")
+            return False
 
     def _ensure_non_empty_pools(self) -> None:
         if not self.face.pool:
