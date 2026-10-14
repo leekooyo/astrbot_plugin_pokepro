@@ -366,7 +366,7 @@
             "enabled": {
                 "description": "是否启用",
                 "type": "bool",
-                "default": true
+                "default": false
             },
             "cron": {
                 "description": "定时触发",
@@ -376,11 +376,9 @@
             },
             "target": {
                 "description": "发戳目标",
-                "hint": "定义在哪个群戳谁，格式为 群号:QQ号",
+                "hint": "每行填写 群号:QQ号 或 群号:random；默认不向任何账号定时发送。",
                 "type": "list",
-                "default": [
-                    "460973561:1959676873"
-                ]
+                "default": []
             },
             "times": {
                 "description": "戳的次数",

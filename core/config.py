@@ -22,6 +22,18 @@ from astrbot.core.utils.image_ref_utils import ALLOWED_IMAGE_EXTENSIONS
 from .model import PokeModel
 
 
+# ===================== [patcher:poke-gallery] =====================
+# 戳一戳「回复表情包」按群共享 meme_manager 图库：
+# 仅读取 meme_manager 落盘的数据文件（selection_rules.json / registry.json），
+# 不 import、不调用其任何代码 —— 耦合仅为「文件格式」，非运行时依赖。
+# 目的：让戳一戳发出的图与该群「表情包」发送侧完全同源（同一批图）。
+_POKE_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+#   ↑ 与 meme_manager 的 backend/packs/images.IMAGE_EXTENSIONS 保持一致，
+#     以保证「同一图库」语义严格对齐（如需额外剔除某种格式，改这一行即可）。
+_POKE_REVIEW_CATEGORY = "needs_review"
+#   ↑ meme_manager 的待审哨兵分类，发送侧亦不外发，此处一并对齐。
+# ==================================================================
+
 class ConfigNode:
     """
     配置节点, 把 dict 变成强类型对象。
@@ -417,11 +429,18 @@ class PluginConfig(ConfigNode):
         """获取表情包"""
         return random.choice(self.face.pool)
 
-    def get_image(self) -> str:
-        """获取图片"""
-        if not self.meme_image_pool:
+    def get_image(self, group_id: str | None = None) -> str:
+        """获取图片。
+
+        [patcher:poke-gallery] 优先取「该群在 meme_manager 绑定的图库」（与表情发送侧同源）；
+        无绑定 / meme_manager 不可用时，回退戳一戳自池。
+        """
+        pool = self._mm_group_pool(group_id)
+        if not pool:
+            pool = self._poke_own_pool()
+        if not pool:
             return ""
-        return random.choice(self.meme_image_pool)
+        return random.choice(pool)
 
     def get_record(self) -> str:
         """获取语音"""
@@ -430,6 +449,159 @@ class PluginConfig(ConfigNode):
         rel_path = Path(random.choice(self.record.pool))
         abs_path = self.data_dir / rel_path
         return str(abs_path.resolve())
+
+    # ---------- [patcher:poke-gallery] 按群共享 meme_manager 图库 ----------
+    def _mm_data_dir(self) -> Path:
+        return Path(get_astrbot_plugin_data_path()) / "meme_manager"
+
+    def _mm_read_json(self, name: str):
+        path = self._mm_data_dir() / name
+        try:
+            if not path.is_file():
+                return None
+            return json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            logger.warning(f"[戳一戳] 读取 meme_manager/{name} 失败：{exc}")
+            return None
+
+    def _mm_enabled_pack_ids(self, registry) -> set[str] | None:
+        if not isinstance(registry, dict):
+            return None
+        installed = registry.get("installed_packs")
+        if not isinstance(installed, list):
+            return None
+        enabled: set[str] = set()
+        for pack in installed:
+            if (
+                isinstance(pack, dict)
+                and pack.get("id")
+                and bool(pack.get("enabled", True))
+            ):
+                enabled.add(str(pack["id"]).strip())
+        return enabled
+
+    def _mm_resolve_pack_ids(self, group_id: str | None) -> list[str]:
+        """镜像 meme_manager resolver：按 session 规则命中本群，否则回退 default 规则。"""
+        rules_doc = self._mm_read_json("selection_rules.json")
+        if not isinstance(rules_doc, dict):
+            return []
+        version = rules_doc.get("schema_version")
+        if version not in (None, 1):
+            logger.warning(
+                f"[戳一戳] selection_rules schema_version={version} 非预期，回退自池"
+            )
+            return []
+        rules = rules_doc.get("rules")
+        if not isinstance(rules, list):
+            return []
+
+        def rule_ids(rule: dict) -> list[str]:
+            ids: list[str] = []
+            raw = rule.get("pack_ids")
+            if isinstance(raw, list):
+                for item in raw:
+                    pid = str(item or "").strip()
+                    if pid and pid not in ids:
+                        ids.append(pid)
+            if not ids:
+                single = str(rule.get("pack_id") or "").strip()
+                if single:
+                    ids = [single]
+            return ids
+
+        gid = str(group_id).strip() if group_id is not None else ""
+        session_ids: list[str] = []
+        default_ids: list[str] = []
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            scope = str(rule.get("scope") or "").strip().lower()
+            ids = rule_ids(rule)
+            if not ids:
+                continue
+            if scope == "session" and gid and str(rule.get("target") or "").strip() == gid:
+                session_ids = ids
+                break
+            if scope == "default" and not default_ids:
+                default_ids = ids
+
+        chosen = session_ids or default_ids
+        if not chosen:
+            return []
+        enabled = self._mm_enabled_pack_ids(self._mm_read_json("registry.json"))
+        if enabled is not None:
+            chosen = [pid for pid in chosen if pid in enabled]
+        mm_root = self._mm_data_dir()
+        return [pid for pid in chosen if (mm_root / "packs" / pid / "memes").is_dir()]
+
+    def _mm_collect_images(self, pack_ids: list[str]) -> list[str]:
+        mm_root = self._mm_data_dir()
+        images: list[str] = []
+        seen: set[str] = set()
+        for pack_id in pack_ids:
+            memes_dir = mm_root / "packs" / pack_id / "memes"
+            if not memes_dir.is_dir():
+                continue
+            for entry in sorted(memes_dir.rglob("*")):
+                if not entry.is_file():
+                    continue
+                if entry.suffix.lower() not in _POKE_IMAGE_EXTENSIONS:
+                    continue
+                if _POKE_REVIEW_CATEGORY in entry.relative_to(memes_dir).parts:
+                    continue
+                resolved = str(entry.resolve())
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                images.append(resolved)
+        return images
+
+    def _mm_group_pool(self, group_id: str | None) -> list[str]:
+        """按群惰性构建并缓存；selection_rules/registry 变更（mtime）即失效重扫。"""
+        rules_path = self._mm_data_dir() / "selection_rules.json"
+        reg_path = self._mm_data_dir() / "registry.json"
+        try:
+            stamp = (
+                rules_path.stat().st_mtime_ns if rules_path.is_file() else 0,
+                reg_path.stat().st_mtime_ns if reg_path.is_file() else 0,
+            )
+        except OSError:
+            stamp = (0, 0)
+
+        cache = self.__dict__.get("_mm_group_cache")
+        if cache is None:
+            cache = {}
+            self.__dict__["_mm_group_cache"] = cache
+        key = str(group_id) if group_id is not None else ""
+        hit = cache.get(key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+
+        pool = self._mm_collect_images(self._mm_resolve_pack_ids(group_id))
+        cache[key] = (stamp, pool)
+        return pool
+
+    def _poke_own_pool(self) -> list[str]:
+        """戳一戳自池（files/meme/pool）—— 兜底图源。"""
+        cache = self.__dict__.get("_poke_own_pool")
+        if cache is not None:
+            return cache
+        pool: list[str] = []
+        seen: set[str] = set()
+        if self.file_pool_dir.is_dir():
+            for entry in sorted(self.file_pool_dir.rglob("*")):
+                if not entry.is_file():
+                    continue
+                if entry.suffix.lower() not in _POKE_IMAGE_EXTENSIONS:
+                    continue
+                resolved = str(entry.resolve())
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                pool.append(resolved)
+        self.__dict__["_poke_own_pool"] = pool
+        return pool
+
 
     def weight_of(self, module: PokeModel) -> int:
         return {

@@ -137,7 +137,7 @@ class GetPokeHandler:
 
     async def respond_meme(self, event: AiocqhttpMessageEvent):
         """回复表情包"""
-        img = self.cfg.get_image()
+        img = self.cfg.get_image(event.get_group_id())
         if img:
             yield event.image_result(img)
         else:
