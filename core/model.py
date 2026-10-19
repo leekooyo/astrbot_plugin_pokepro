@@ -81,32 +81,3 @@ class PokeEvent:
     def is_private_poke(self) -> bool:
         """是否私聊戳（极少，但语义完整）"""
         return self.group_id is None
-
-
-# 示例原始数据
-# raw = {
-#     "time": 1770684953,
-#     "self_id": 1959676873,
-#     "post_type": "notice",
-#     "notice_type": "notify",
-#     "sub_type": "poke",
-#     "target_id": 1959676873,
-#     "user_id": 2936169201,
-#     "group_id": 952212291,
-#     "raw_info": [
-#         {"col": "1", "nm": "", "type": "qq", "uid": "u_QmVcCfvoEUKZv6rb2WM7Lw"},
-#         {
-#             "jp": "https://zb.vip.qq.com/v2/pages/nudgeMall?_wv=2&actionId=0&effectId=5",
-#             "src": "http://tianquan.gtimg.cn/nudgeeffect/item/5/client.gif",
-#             "type": "img",
-#         },
-#         {
-#             "col": "1",
-#             "nm": "",
-#             "tp": "0",
-#             "type": "qq",
-#             "uid": "u_4Twr4XaJJ8CPkZI5hKOPsw",
-#         },
-#         {"txt": "的服务器", "type": "nor"},
-#     ],
-# }
