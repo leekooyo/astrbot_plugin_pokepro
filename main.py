@@ -76,7 +76,7 @@ class PokeproPlugin(Star):
             tid for tid in target_ids if tid.isdigit() and tid != self_id
         ))
         if not target_ids:
-            yield event.plain_result("用法：戳 @某人 [次数]、戳我 [次数]；群发请用戳全体成员。")
+            yield event.plain_result("用法：/戳 @群友 [次数]；戳自己用 /戳我 [次数]，群发用 /戳全体成员。")
             return
 
         result = await self.sender.event_send(
