@@ -1,19 +1,18 @@
 
 <div align="center">
 
-![:name](https://count.getloli.com/@astrbot_plugin_pokepro?name=astrbot_plugin_pokepro&theme=minecraft&padding=6&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
 
 # astrbot_plugin_pokepro
+
 
 _✨ 专业戳一戳 ✨_  
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![AstrBot](https://img.shields.io/badge/AstrBot-4.0%2B-orange.svg)](https://github.com/Soulter/AstrBot)
-[![GitHub](https://img.shields.io/badge/作者-Zhalslar-blue)](https://github.com/Zhalslar)
 </div>
 
-> 注意：戳一戳插件最新版依赖 `AstrBot v4.13.0+`  , 请先升级 AstrBot 至 v4.13.0+, 否则会无法加载插件
+> 本仓库由 [leekooyo](https://github.com/leekooyo) 维护，基于 [Zhalslar 的原项目](https://github.com/Zhalslar/astrbot_plugin_pokepro)；安装和更新请使用本仓库地址。原始基线见 [UPSTREAM.md](UPSTREAM.md)。
+
+> 安装后请在测试群验证当前 AstrBot 与 QQ 适配器的戳一戳事件及发送接口；旧版 README 的固定最低版本要求未在本维护版重新验证。
 
 ## 🤝 介绍
 
@@ -121,12 +120,9 @@ _✨ 专业戳一戳 ✨_
 
 单独输入 `戳` 会显示用法，不会根据群消息历史自动选择目标。命令会回报成功、失败和跳过次数；定时任务会在日志中记录结果。`llm.weight=0` 时，禁言动作也不会额外调用 LLM 生成提示。
 
-## 👥 贡献指南
+## 反馈与维护
 
-- 🌟 **Star 这个项目！**（点右上角的星星，感谢支持！）
-- 🐛 提交 Issue 报告问题
-- 💡 提出新功能建议
-- 🔧 提交 Pull Request 改进代码
+此维护版的问题和改进请在本仓库提交 Issue 或 Pull Request。上游版本会在核对差异后手动合并。
 
 ## 📌 注意事项
 
